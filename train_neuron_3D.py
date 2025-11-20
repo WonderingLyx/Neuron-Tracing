@@ -54,6 +54,9 @@ from lib.swclib import edge_match_utils
 from lib.swclib.re_sample import up_sample_swc_tree
 
 import copy
+import yaml
+
+
 
 
 args = config_neuron_3d.args
@@ -249,6 +252,13 @@ def train(args, model_name, device_ids, device):
             print("Creation of the model directory '%s' failed" % read_model_path)
         else:
             print("Successfully created the model directory '%s' " % read_model_path)
+    
+    if read_model_path:
+        params_save_path = read_model_path + '/params.yaml'
+        params = vars(args)
+        with open(params_save_path, 'w') as f:
+            yaml.dump(params, f, sort_keys=False, default_flow_style=False)
+        
 
     ######################DATA NROM########################
 
