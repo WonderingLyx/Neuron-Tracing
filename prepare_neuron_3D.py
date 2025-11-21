@@ -13,7 +13,7 @@ from lib.swclib import euclidean_point
 from lib.swclib import edge_match_utils, point_match_utils
 
 import copy
-import cv2 as cv
+#import cv2 as cv
 import multiprocessing as mp
 from skimage import morphology
 import time
@@ -37,12 +37,12 @@ def parse_args():
 	parser = argparse.ArgumentParser()
 
 	# (input dir) orginal data
-	parser.add_argument('--datasets_name', default='single_neuron_3d',help='datasets name') # CHASEDB1
+	parser.add_argument('--datasets_name', default='Neuron3d_192',help='datasets name') # CHASEDB1
 
-	parser.add_argument('--image_dir', default='/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/', help='orginal image saved here')
+	parser.add_argument('--image_dir', default='/root/shared-nvme/lyx_neuron/data/DATASET/', help='orginal image saved here')
 	
 	# (output dir)
-	parser.add_argument('--train_dataset_root_dir', default='/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/single_neuron_3d/dataset/', help='training dataset saved here')
+	parser.add_argument('--train_dataset_root_dir', default='/root/shared-nvme/lyx_neuron/data/DATASET/Neuron3d_192/dataset/', help='training dataset saved here')
 	parser.add_argument('--N_patches', default=300,help='Number of training image patches') # 80000 20000
 	parser.add_argument('--data_type', default='uint8') # 80000 20000
  
@@ -80,15 +80,29 @@ def parse_args():
 
 
 
-def vector_norm_f(vector_org):
-	vector0 = vector_org[0]
-	vector1 = vector_org[1]
-	vector2 = vector_org[2]
+# def vector_norm_f(vector_org):
+# 	vector0 = vector_org[0]
+# 	vector1 = vector_org[1]
+# 	vector2 = vector_org[2]
 
-	vector_norm = [0,0,0]
-	for i in range(3):
-		vector_norm[i] = vector_org[i] / np.sqrt(vector0 ** 2 + vector1 ** 2 + vector2 ** 2)
-	return vector_norm
+# 	vector_norm = [0,0,0]
+# 	for i in range(3):
+# 		vector_norm[i] = vector_org[i] / np.sqrt(vector0 ** 2 + vector1 ** 2 + vector2 ** 2)
+# 	return vector_norm
+
+def vector_norm_f(vector_org):
+    # 将输入转换为 numpy 数组
+    vector_org = np.array(vector_org)
+    
+    # 计算范数（模长）
+    norm = np.linalg.norm(vector_org)
+    
+    # 防止除以 0 的情况
+    if norm == 0:
+        return vector_org
+    
+    # 直接利用 numpy 的广播机制进行除法
+    return vector_org / norm
 
 def up_sample_swc_rescale(swc_dir, length_threshold, resize_radio):
 	swc_tree_upsample = read_swc_tree(swc_dir)
@@ -706,8 +720,8 @@ def main_training_data(input_dir):
 		swc_upsample_length = 99.0
 		sample_gap = 1
 		seq_len = 3
-		single_neuron_3d
-	elif datasets_name == "single_neuron_3d":
+		
+	elif datasets_name == "Neuron3d_192":
 		img_dir = org_image_train_dir + image_name + '.tif'
 		swc_dir = org_swc_train_dir + image_name + '.swc'
 
