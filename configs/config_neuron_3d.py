@@ -5,7 +5,7 @@ parser = argparse.ArgumentParser(description='Hyper-parameters management')
 # Hardware options
 parser.add_argument('--n_threads', type=int, default=20,help='number of threads for data loading')
 parser.add_argument('--cpu', action='store_true',help='use cpu only')
-parser.add_argument('--gpu_id', type=int, default=0, help='use gpu only')
+parser.add_argument('--gpu_id', type=int, default=1, help='use gpu only')
 parser.add_argument("--local_rank", type=int, default=-1)
 
 # parser.add_argument('--seed', default=0, type=int)
@@ -18,7 +18,7 @@ parser.add_argument("--local_rank", type=int, default=-1)
 parser.add_argument("--resize_radio", type=float, default=1.0) # FMOST
 parser.add_argument("--r_resize", type=float, default=10)
 
-parser.add_argument('--device_id', default='0', type=str)
+parser.add_argument('--device_id', default='1', type=str)
 
 
 # Datasets parameters FMOST DIEDAM FMOST_mpgan

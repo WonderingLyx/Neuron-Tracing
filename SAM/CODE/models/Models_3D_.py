@@ -4,10 +4,127 @@ import torch.nn.functional as F
 import torch.utils.data
 import torch
 
+from sam2.build_sam import build_sam2
+import tifffile as tiff
+import torchvision.transforms.functional as func
+from torchvision.transforms import InterpolationMode
 from configs import config_3d
 args = config_3d.args
 vector_bins = args.vector_bins
 
+backbone_channel_list = {
+    "sam2_hiera_l" : [1152, 576, 288, 144],
+    "sam2_hiera_s" : [768, 384, 192, 96]
+}
+
+class Adapter(nn.Module):
+    def __init__(self, blk, adadim) -> None:
+        super(Adapter, self).__init__()
+        self.block = blk
+        dim = blk.attn.qkv.in_features
+        self.prompt_learn = nn.Sequential(
+            nn.Linear(dim, adadim),
+            nn.GELU(),
+            nn.Linear(adadim, dim),
+            nn.GELU()
+        )
+
+    def forward(self, x):
+        prompt = self.prompt_learn(x)
+        promped = x + prompt
+        net = self.block(promped)
+        return net
+
+class BasicConv2d(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1):
+        super(BasicConv2d, self).__init__()
+        self.conv = nn.Conv2d(in_planes, out_planes,
+                              kernel_size=kernel_size, stride=stride,
+                              padding=padding, dilation=dilation, bias=False)
+        self.bn = nn.BatchNorm2d(out_planes)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return x
+
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+	
+class RFB_modified(nn.Module):
+    def __init__(self, in_channel, out_channel):
+        super(RFB_modified, self).__init__()
+        self.relu = nn.ReLU(True)
+        self.branch0 = nn.Sequential(
+            BasicConv2d(in_channel, out_channel, 1),
+        )
+        self.branch1 = nn.Sequential(
+            BasicConv2d(in_channel, out_channel, 1),
+            BasicConv2d(out_channel, out_channel, kernel_size=(1, 3), padding=(0, 1)),
+            BasicConv2d(out_channel, out_channel, kernel_size=(3, 1), padding=(1, 0)),
+            BasicConv2d(out_channel, out_channel, 3, padding=3, dilation=3)
+        )
+        self.branch2 = nn.Sequential(
+            BasicConv2d(in_channel, out_channel, 1),
+            BasicConv2d(out_channel, out_channel, kernel_size=(1, 5), padding=(0, 2)),
+            BasicConv2d(out_channel, out_channel, kernel_size=(5, 1), padding=(2, 0)),
+            BasicConv2d(out_channel, out_channel, 3, padding=5, dilation=5)
+        )
+        self.branch3 = nn.Sequential(
+            BasicConv2d(in_channel, out_channel, 1),
+            BasicConv2d(out_channel, out_channel, kernel_size=(1, 7), padding=(0, 3)),
+            BasicConv2d(out_channel, out_channel, kernel_size=(7, 1), padding=(3, 0)),
+            BasicConv2d(out_channel, out_channel, 3, padding=7, dilation=7)
+        )
+        self.conv_cat = BasicConv2d(4*out_channel, out_channel, 3, padding=1)
+        self.conv_res = BasicConv2d(in_channel, out_channel, 1)
+    def forward(self, x):
+        x0 = self.branch0(x)
+        x1 = self.branch1(x)
+        x2 = self.branch2(x)
+        x3 = self.branch3(x)
+        x_cat = self.conv_cat(torch.cat((x0, x1, x2, x3), 1))
+
+        x = self.relu(x_cat + self.conv_res(x))
+        return x
+	
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
 
 class up_conv_3d(nn.Module):
 	"""
@@ -98,15 +215,76 @@ class LSTM(nn.Module):
         # print(out.shape)
         return [out1, out2, out3], hidden
 
-class CSFL_Net_3D(nn.Module):
+class SAM2_Net_3D(nn.Module):
 	"""
 	Res_U_Net - Basic Implementation
 	Paper : https://arxiv.org/abs/1505.04597
 	"""
 
-	def __init__(self, in_ch=1, out_ch=1, freeze_net = False):
-		super(CSFL_Net_3D, self).__init__()
-  
+	def __init__(self, in_ch=1, out_ch=1, freeze_net = False,  checkpoint_path=None, model_cfg=None, device=None, sam2d_batch_size=16):
+		super(SAM2_Net_3D, self).__init__()
+
+		#* parameter
+		self.sam2d_batch_size = sam2d_batch_size
+
+		#* build sam encoder
+		if model_cfg is None: 
+			model_cfg = "sam2_hiera_l.yaml"
+		else:
+			sam_types = ['sam2_hiera_l', 'sam2_hiera_s']
+			assert model_cfg in sam_types
+			model_cfg = model_cfg + '.yaml'
+		
+		if device is None:
+			device = torch.device("cpu")
+
+		if checkpoint_path:
+			model = build_sam2(model_cfg, checkpoint_path, device=device)
+		else:
+			model = build_sam2(model_cfg)
+		del model.sam_mask_decoder
+		del model.sam_prompt_encoder
+		del model.memory_encoder
+		del model.memory_attention
+		del model.mask_downsample
+		del model.obj_ptr_tpos_proj
+		del model.obj_ptr_proj
+		del model.image_encoder.neck
+		self.encoder = model.image_encoder.trunk
+
+		for param in self.encoder.parameters():
+			param.requires_grad = False
+		blocks = []
+
+		#* 加入Adapter
+		for block in self.encoder.blocks:
+			blocks.append(
+				Adapter(block, args.adadim)
+			)
+		
+		self.encoder.blocks = nn.Sequential(
+			*blocks
+		)
+		self.backbone_channel_list = backbone_channel_list[model_cfg.split('.')[0]]
+		ch_list = self.backbone_channel_list
+		#* 统一channel数量
+		self.rfb1 = RFB_modified(ch_list[3], args.rfbdim)
+		self.rfb2 = RFB_modified(ch_list[2], args.rfbdim)
+		self.rfb3 = RFB_modified(ch_list[1], args.rfbdim)
+		self.rfb4 = RFB_modified(ch_list[0], args.rfbdim)
+		self.up1 = (Up(args.rfbdim *2, args.rfbdim))
+		self.up2 = (Up(args.rfbdim *2, args.rfbdim))
+		self.up3 = (Up(args.rfbdim *2, args.rfbdim))
+		self.up4 = (Up(args.rfbdim *2, args.rfbdim))
+		self.side1 = nn.Conv2d(args.rfbdim, 1, kernel_size=1)
+		self.side2 = nn.Conv2d(args.rfbdim, 1, kernel_size=1)
+		self.head = nn.Conv2d(args.rfbdim, 1, kernel_size=1)
+		self.chead = nn.Conv2d(args.rfbdim, 1, kernel_size=1)
+
+		self.rnn_trans0 = nn.Linear(in_features=11*11*args.rfbdim//4, out_features=1024)
+		self.rnn_trans1 = nn.Linear(in_features=11*11*args.rfbdim//4, out_features=1024)
+
+		#*##################################
 		self.n1 = 32
 		filters = [self.n1, self.n1 * 2, self.n1 * 4, self.n1 * 8, self.n1 * 16]
 		
@@ -212,6 +390,53 @@ class CSFL_Net_3D(nn.Module):
 
 		self.Radius4_RNN = LSTM(self.input_size_RNN, self.hidden_size_RNN, self.output_size_radius, self.seq_len)
 		# RNN Block
+	def encode_batch(self, x):
+		x1, x2, x3, x4 = self.encoder(x)
+		x1, x2, x3, x4 = self.rfb1(x1), self.rfb2(x2), self.rfb3(x3), self.rfb4(x4)
+		x = self.up1(x4, x3)
+		out1 = F.interpolate(self.side1(x), scale_factor=16, mode='bilinear')
+		x = self.up2(x, x2)
+		out2 = F.interpolate(self.side2(x), scale_factor=8, mode='bilinear')
+		x = self.up3(x, x1)
+		d_seg = F.interpolate(self.head(x), scale_factor=4, mode='bilinear') 
+		d_seg = nn.Sigmoid()(d_seg)
+
+		d_centerline = F.interpolate(self.chead(x), scale_factor=4, mode='bilinear')
+		d_centerline = nn.Sigmoid()(d_centerline)
+
+		e5 = x4
+
+		return d_seg, d_centerline, e5
+
+	def forward_volume(self, x):
+		# x: [B, C, D, H, W] C=1
+		B, C, D, H, W = x.shape
+		x = x.permute(0,2,1,3,4)  # [B, D, C, H, W]
+		x = x.reshape(-1, x.shape[2], x.shape[3], x.shape[4])  # [B*D, C, H, W]
+		x = x.reshape(-1, self.sam2d_batch_size, x.shape[1], x.shape[2], x.shape[3])  # [num_batches, sam2d_batch_size, C, H, W]
+
+		seg, centerline, features = [], [], []
+		for i, batch in enumerate(x):
+			batch = batch.to(next(self.encoder.parameters()).device)
+			d_seg, d_centerline, e5 = self.encode_batch(batch)
+
+			d_seg = d_seg.unsqueeze(0)  
+			d_centerline = d_centerline.unsqueeze(0)
+			e5 = e5.unsqueeze(0)
+
+			seg.append(d_seg)
+			centerline.append(d_centerline)
+			features.append(e5)
+		
+		seg = torch.cat(seg, dim=0)
+		centerline = torch.cat(centerline, dim=0)
+		features = torch.cat(features, dim=0)
+
+		seg = seg.reshape(B, D, seg.shape[2], seg.shape[3], seg.shape[4])
+		centerline = centerline.reshape(B, D, centerline.shape[2], centerline.shape[3], centerline.shape[4])
+		features = features.reshape(B, D, features.shape[2], features.shape[3], features.shape[4], features.shape[5])
+
+		return seg, centerline, features
 
 
 	def forward(self, x, mode = 'train'):
@@ -225,55 +450,9 @@ class CSFL_Net_3D(nn.Module):
 			for t in range(seq_len): 
 				input_image = x[:, t, :, :, :, :]
 
-				d0 = self.conv_input(input_image)
+				seg, centerline, features = self.forward_volume(input_image)
 
-				e1 = self.Conv1(d0)
-				e1_d = self.Down1(e1)
-
-				e2 = self.Conv2(e1_d)
-				e2_d = self.Down2(e2)
-
-				e3 = self.Conv3(e2_d)
-				e3_d = self.Down3(e3)
-
-				e4 = self.Conv4(e3_d)
-				e4_d = self.Down4(e4)
-
-				e5_2 = self.Conv5_1(e4_d)
-				e5_1 = self.Conv5_2(e5_2)
-				e5 = self.Conv5_3(e5_1)
-				# e5 = self.Conv5_1(e4_d)
-
-				# print(e5.shape)
-
-				d5 = self.Up5(e5)
-				d5 = torch.add(e4, d5)
-				d5 = self.Up_conv5(d5)
-
-				d4 = self.Up4(d5)
-				d4 = torch.add(e3, d4)
-				d4 = self.Up_conv4(d4)
-
-				d3 = self.Up3(d4)
-				d3 = torch.add(e2, d3)
-				d3 = self.Up_conv3(d3)
-
-				d2 = self.Up2(d3)
-				d2 = torch.add(e1, d2)
-				d2 = self.Up_conv2(d2)
-
-
-				# exist block
-				d6_1 = self.Conv6_1(d2)	
-				d6_2 = self.Conv6_2(d6_1)	
-				d_seg = self.Conv6_out(d6_2)
-
-				# centerline block
-				d7_1 = self.Conv7_1(d2)	
-				d7_2 = self.Conv7_2(d7_1)	
-				d_centerline = self.Conv7_out(d7_2)	
-
-				# direction block
+				#TODO direction block
 				t1 = self.Tracer1(e5)
 				t2 = self.Tracer2(t1)
 				t3 = self.Tracer3(t2)

@@ -1403,7 +1403,7 @@ if __name__=='__main__':
     #######################################################
     #              Checking if GPU is used
     #######################################################
-    device_ids = [0,1]
+    device_ids = [1]
     train_on_gpu = torch.cuda.is_available()
     if not train_on_gpu:
         print('CUDA is not available. Training on CPU')
