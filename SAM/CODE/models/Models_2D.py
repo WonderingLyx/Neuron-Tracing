@@ -301,58 +301,6 @@ class SAM2_Net_2D(nn.Module):
 		self.output_size_direction = vector_bins #50
 		self.output_size_radius = 1
 
-
-		# self.conv_input = nn.Sequential(nn.Conv2d(in_ch, filters[0], kernel_size=3, stride=1, padding=1, bias=True), 
-		# 								nn.BatchNorm2d(filters[0]),
-		# 								nn.ReLU(inplace=True))
-
-		# self.Conv1 = res_conv_block_2d(filters[0], filters[0])
-		# self.Down1 = down_conv_2d(filters[0], filters[1])
-
-		# self.Conv2 = res_conv_block_2d(filters[1], filters[1])
-		# self.Down2 = down_conv_2d(filters[1], filters[2])
-
-		# self.Conv3 = res_conv_block_2d(filters[2], filters[2])
-		# self.Down3 = down_conv_2d(filters[2], filters[3])
-
-		# self.Conv4 = res_conv_block_2d(filters[3], filters[3])
-		# self.Down4 = down_conv_2d(filters[3], filters[4])
-
-		# self.Conv5_1 = res_conv_block_2d(filters[4], filters[4])
-		# self.Conv5_2 = res_conv_block_2d(filters[4], filters[4])
-		# self.Conv5_3 = res_conv_block_2d(filters[4], filters[4])
-
-		# self.Up5 = up_conv_2d(filters[4], filters[3])
-		# self.Up_conv5 = res_conv_block_2d(filters[3], filters[3])
-
-		# self.Up4 = up_conv_2d(filters[3], filters[2])
-		# self.Up_conv4 = res_conv_block_2d(filters[2], filters[2])
-
-		# self.Up3 = up_conv_2d(filters[2], filters[1])
-		# self.Up_conv3 = res_conv_block_2d(filters[1], filters[1])
-
-		# self.Up2 = up_conv_2d(filters[1], filters[0])
-		# self.Up_conv2 = res_conv_block_2d(filters[0], filters[0])
-		
-		# # seg block
-		# self.Conv6_1 = nn.Sequential(nn.Conv2d(filters[0], filters[0], kernel_size=3, stride=1, padding=1),
-		# 								nn.BatchNorm2d(filters[0]),
-		# 								nn.ReLU(inplace=True))
-		# self.Conv6_2 = nn.Sequential(nn.Conv2d(filters[0], filters[0], kernel_size=3, stride=1, padding=1),
-		# 								nn.BatchNorm2d(filters[0]),
-		# 								nn.ReLU(inplace=True))
-		# self.Conv6_out = nn.Sequential(nn.Conv2d(filters[0], out_ch, kernel_size=3, stride=1, padding=1),
-		# 								nn.Sigmoid())
-
-		# # centerline block
-		# self.Conv7_1 = nn.Sequential(nn.Conv2d(filters[0], filters[0], kernel_size=3, stride=1, padding=1),
-		# 								nn.BatchNorm2d(filters[0]),
-		# 								nn.ReLU(inplace=True))
-		# self.Conv7_2 = nn.Sequential(nn.Conv2d(filters[0], filters[0], kernel_size=3, stride=1, padding=1),
-		# 								nn.BatchNorm2d(filters[0]),
-		# 								nn.ReLU(inplace=True))
-		# self.Conv7_out = nn.Sequential(nn.Conv2d(filters[0], out_ch, kernel_size=3, stride=1, padding=1),
-		# 								nn.Sigmoid())
 		if freeze_net:
 			print("freezing")
 			freeze(self)			
@@ -409,49 +357,7 @@ class SAM2_Net_2D(nn.Module):
 				d_centerline = nn.Sigmoid()(d_centerline)
 
 				e5 = x4
-				# d0 = self.conv_input(input_image)
-				# e1 = self.Conv1(d0)
-				# e1_d = self.Down1(e1)
-
-				# e2 = self.Conv2(e1_d)
-				# e2_d = self.Down2(e2)
-
-				# e3 = self.Conv3(e2_d)
-				# e3_d = self.Down3(e3)
-
-				# e4 = self.Conv4(e3_d)
-				# e4_d = self.Down4(e4)
-
-				# e5_2 = self.Conv5_1(e4_d)
-				# e5_1 = self.Conv5_2(e5_2)
-				# e5 = self.Conv5_3(e5_1)
-
-				# d5 = self.Up5(e5)
-				# d5 = torch.add(e4, d5)
-				# d5 = self.Up_conv5(d5)
-
-				# d4 = self.Up4(d5)
-				# d4 = torch.add(e3, d4)
-				# d4 = self.Up_conv4(d4)
-
-				# d3 = self.Up3(d4)
-				# d3 = torch.add(e2, d3)
-				# d3 = self.Up_conv3(d3)
-
-				# d2 = self.Up2(d3)
-				# d2 = torch.add(e1, d2)
-				# d2 = self.Up_conv2(d2)
-
-
-				# # exist block
-				# d6_1 = self.Conv6_1(d2)	
-				# d6_2 = self.Conv6_2(d6_1)	
-				# d_seg = self.Conv6_out(d6_2)
-
-				# # centerline block
-				# d7_1 = self.Conv7_1(d2)	
-				# d7_2 = self.Conv7_2(d7_1)	
-				# d_centerline = self.Conv7_out(d7_2)	
+				
 
 				# direction block
 				t1 = self.Tracer1(e5)
@@ -548,51 +454,7 @@ class SAM2_Net_2D(nn.Module):
 			d_centerline = F.interpolate(self.chead(x), scale_factor=4, mode='bilinear')
 			d_centerline = nn.Sigmoid()(d_centerline)
 
-			# d0 = self.conv_input(input_image)
-
-			# e1 = self.Conv1(d0)
-			# e1_d = self.Down1(e1)
-
-			# e2 = self.Conv2(e1_d)
-			# e2_d = self.Down2(e2)
-
-			# e3 = self.Conv3(e2_d)
-			# e3_d = self.Down3(e3)
-
-			# e4 = self.Conv4(e3_d)
-			# e4_d = self.Down4(e4)
-
-			# e5_2 = self.Conv5_1(e4_d)
-			# e5_1 = self.Conv5_2(e5_2)
-			# e5 = self.Conv5_3(e5_1)
-				
-
-			# d5 = self.Up5(e5)
-			# d5 = torch.add(e4, d5)
-			# d5 = self.Up_conv5(d5)
-
-			# d4 = self.Up4(d5)
-			# d4 = torch.add(e3, d4)
-			# d4 = self.Up_conv4(d4)
-
-			# d3 = self.Up3(d4)
-			# d3 = torch.add(e2, d3)
-			# d3 = self.Up_conv3(d3)
-
-			# d2 = self.Up2(d3)
-			# d2 = torch.add(e1, d2)
-			# d2 = self.Up_conv2(d2)
-
-
-			# # exist block
-			# d6_1 = self.Conv6_1(d2)	
-			# d6_2 = self.Conv6_2(d6_1)	
-			# d_seg = self.Conv6_out(d6_2)
-
-			# # centerline block
-			# d7_1 = self.Conv7_1(d2)	
-			# d7_2 = self.Conv7_2(d7_1)	
-			# d_centerline = self.Conv7_out(d7_2)	
+			
 			return d_seg, d_centerline
 		
 		elif mode == 'test_d':
