@@ -5,13 +5,13 @@ from sklearn.model_selection import train_test_split
 import tifffile as tiff
 from tqdm import tqdm
 
-imgs_labels_path = "/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/data/OpenSource/A neuronal imaging dataset for deep learning in the reconstruction of single-neuron axons/images/images-8bit"
-swc_dir = "/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/data/OpenSource/A neuronal imaging dataset for deep learning in the reconstruction of single-neuron axons/swc/swc"
+imgs_labels_path = "data/NeuronOpenSource/Neuron3d_192_192_192/images-8bit-filter"
+swc_dir = "/root/shared-nvme/lyx_neuron/data/NeuronOpenSource/Neuron3d_192_192_192/swc"
 
 #! if split temperal
-labels_path = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/data/OpenSource/A neuronal imaging dataset for deep learning in the reconstruction of single-neuron axons/mask/mask'
+labels_path = '/root/shared-nvme/lyx_neuron/data/NeuronOpenSource/Neuron3d_192_192_192/mask'
 
-target_dir = "/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/single_neuron_3d"
+target_dir = "/root/shared-nvme/lyx_neuron/data/DATASET/Neuron3d_192"
 TEST_RATIO = 0.2
 
 if os.path.exists(target_dir):
