@@ -1,98 +1,132 @@
 import argparse
+from pathlib import Path
+from typing import Any, Dict, List
 
-parser = argparse.ArgumentParser(description='Hyper-parameters management')
-
-# Hardware options
-parser.add_argument('--n_threads', type=int, default=20,help='number of threads for data loading')
-parser.add_argument('--cpu', action='store_true',help='use cpu only')
-parser.add_argument('--gpu_id', type=int, default=0, help='use gpu only')
-parser.add_argument("--local_rank", type=int, default=-1)
-
-# parser.add_argument('--seed', default=0, type=int)
-# parser.add_argument('--init_method', default='tcp://localhost:52013', type=str)
-# parser.add_argument('--rank', default=0, type=int)
-# parser.add_argument('--world_size', default=0, type=int)
-# parser.add_argument('--device_id_list_str', default='0,1,2,3', type=str)
+from omegaconf import OmegaConf
 
 
-parser.add_argument("--resize_radio", type=float, default=1.0) # FMOST
-parser.add_argument("--r_resize", type=float, default=10)
-
-parser.add_argument('--device_id', default='0', type=str)
-
-#TODO Model config
-parser.add_argument(
-    "--sam2_pretrain",
-    default="/mnt/40B2A1DBB2A1D5A6/lyx/project/MODEL/Sam2/sam2_hiera_large.pt",
-    help="path to sam2 weights"
-)
-parser.add_argument(
-    "--adadim",
-    default=32,
-    help=" dims for adapter in sam2"
-)
-parser.add_argument(
-    "--rfbdim",
-    default=128,
-    help="dim for rfb block"
-)
+_DEFAULT_CONFIG_PATH = Path(__file__).with_suffix(".yaml")
 
 
-# Datasets parameters FMOST DIEDAM FMOST_mpgan
-parser.add_argument('--dataset_name', default = 'FMOST',help='datasets name')
-parser.add_argument('--dataset_img_path', default = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/YiFu0729/dataset/training_datasets/',help='Train datasets image root path')
-parser.add_argument('--dataset_img_test_path', default = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/YiFu0729/dataset/test_datasets/',help='Train datasets label root path')
-parser.add_argument('--test_data_path', default = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/YiFu0729/test/images/',help='Test datasets root path')
-# parser.add_argument('--test_data_mask_path', default = '/4T/liuchao/deepneutracing/deepbranchtracer_3d/FMOST/temp/mask/',help='Test datasets mask root path')
-
-# parser.add_argument('--gold_centerline_path', default = '/4T/liuchao/deepneutracing/deepbranchtracer_3d/FMOST/temp/centerline/',help='Saved centerline result root path')
-# parser.add_argument('--gold_seed_path', default = '/4T/liuchao/deepneutracing/deepbranchtracer_3d/FMOST_mpgan/temp/seed/',help='swc seed root path')
-
-parser.add_argument('--predict_seed_path', default = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/Results/Neuron_3d/Predicts/seed/',help='Seed root path')
-parser.add_argument('--predict_centerline_path', default = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/Results/Neuron_3d/Predicts/pre_centerline_test/',help='Saved centerline result root path')
-parser.add_argument('--predict_swc_path', default = '/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/Results/Neuron_3d/Predicts/pre_swc_test/',help='Saved swc result root path')
+def _resolve_config_path(path_str: str) -> Path:
+    candidate = Path(path_str)
+    if candidate.is_file():
+        return candidate.resolve()
+    alt_candidate = (_DEFAULT_CONFIG_PATH.parent / candidate).resolve()
+    if alt_candidate.is_file():
+        return alt_candidate
+    raise FileNotFoundError(f"Config file not found: {path_str}")
 
 
-
-# parser.add_argument('--test_data_brain_path', default = '/12T/data1/liuchao/Brain_202206/CH1_cut/',help='Test datasets root path')
-# parser.add_argument('--brain_map_path', default = '/12T/data1/liuchao/Brain_202206/202206-whole.signal.tif',help='Test datasets root path')
-# parser.add_argument('--predict_centerline_brain_path', default = '/12T/data1/liuchao/Brain_202206/CH1_prediction_supersived/',help='Saved centerline result root path')
-# parser.add_argument('--predict_swc_brain_path', default = '/12T/data1/liuchao/Brain_202206/CH1_swc/deepbranchtracer_merge/',help='Saved swc result root path')
-
-# 10_20 mpgan
-parser.add_argument('--batch_size', type=int, default=8, help='batch size of trainset')
-parser.add_argument('--valid_rate', type=float, default=0.1, help='')
-parser.add_argument('--data_shape', type=list, default=[64,64,64], help='')
-
-parser.add_argument('--test_patch_height', default=64)
-parser.add_argument('--test_patch_width', default=64)
-parser.add_argument('--test_patch_depth', default=64)
-parser.add_argument('--stride_height', default=48)
-parser.add_argument('--stride_width', default=48)
-parser.add_argument('--stride_depth', default=48)
+def _load_defaults(config_path: Path) -> Dict[str, Any]:
+    cfg = OmegaConf.load(config_path)
+    container = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(container, dict):
+        raise ValueError(f"Config at {config_path} is not a mapping.")
+    return container  # type: ignore[return-value]
 
 
-# data in/out and dataset
-parser.add_argument('--model_save_dir', default='/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/Results/Neuron_3d/model/model_',help='save path of trained model')
-parser.add_argument('--log_save_dir', default='/mnt/40B2A1DBB2A1D5A6/lyx/TMP/neuron_tracing_from4090_1/Reference/DeepBranchTracer-new/DeepBranchTracer-main/data/Results/Neuron_3d/log/log_',help='save path of trained log')
-
-# train
-parser.add_argument('--epochs', type=int, default=30, metavar='N',help='number of epochs to train (default: 200)')
-parser.add_argument('--lr', type=float, default=3e-4, metavar='LR',help='learning rate (default: 0.0001)')
-# parser.add_argument('--early-stop', default=6, type=int, help='early stopping (default: 30)')
-# parser.add_argument('--crop_size', type=int, default=48)
-# parser.add_argument('--val_crop_max_size', type=int, default=96)
-# parser.add_argument('--hidden_layer_size', type=int, default=1)
-parser.add_argument('--vector_bins', type=int, default=50)
-parser.add_argument('--train_seg', default=True, type=bool)
-
-# test
-parser.add_argument('--print_info', default=False, type=bool)
-parser.add_argument('--tracing_strategy_mode', default='anglecenterline', type=str) # centerline  angle   anglecenterlined
-# parser.add_argument('--use_amp', default=False, type=bool)
-parser.add_argument('--train_or_test', default='inference_segmentation')
-parser.add_argument('--to_restore', default=False, type=bool)
+def _str2bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    value_str = str(value).lower()
+    if value_str in {"true", "1", "yes", "y", "t"}:
+        return True
+    if value_str in {"false", "0", "no", "n", "f"}:
+        return False
+    raise argparse.ArgumentTypeError("Boolean value expected.")
 
 
-args = parser.parse_args()
+def _build_parser(defaults: Dict[str, Any], config_path: Path) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Hyper-parameters management")
 
+    parser.add_argument(
+        "--config_path",
+        default=str(config_path),
+        help="Path to YAML config file",
+    )
+
+    # Hardware options
+    parser.add_argument("--n_threads", type=int, default=defaults["n_threads"], help="number of threads for data loading")
+    parser.add_argument("--cpu", action="store_true", default=defaults["cpu"], help="use cpu only")
+    parser.add_argument("--gpu_id", type=int, default=defaults["gpu_id"], help="use gpu only")
+    parser.add_argument("--local_rank", type=int, default=defaults["local_rank"])
+
+    parser.add_argument("--resize_radio", type=float, default=defaults["resize_radio"])
+    parser.add_argument("--r_resize", type=float, default=defaults["r_resize"])
+    parser.add_argument("--device_id", default=defaults["device_id"], type=str)
+
+    # Model config
+    parser.add_argument("--sam2_pretrain", default=defaults["sam2_pretrain"], help="path to sam2 weights")
+    parser.add_argument("--adadim", type=int, default=defaults["adadim"], help="dims for adapter in sam2")
+    parser.add_argument("--rfbdim", type=int, default=defaults["rfbdim"], help="dim for rfb block")
+
+    # Dataset parameters
+    parser.add_argument("--dataset_name", default=defaults["dataset_name"], help="datasets name")
+    parser.add_argument("--dataset_img_path", default=defaults["dataset_img_path"], help="Train datasets image root path")
+    parser.add_argument("--dataset_img_test_path", default=defaults["dataset_img_test_path"], help="Train datasets label root path")
+    parser.add_argument("--test_data_path", default=defaults["test_data_path"], help="Test datasets root path")
+    parser.add_argument("--predict_seed_path", default=defaults["predict_seed_path"], help="Seed root path")
+    parser.add_argument("--predict_centerline_path", default=defaults["predict_centerline_path"], help="Saved centerline result root path")
+    parser.add_argument("--predict_swc_path", default=defaults["predict_swc_path"], help="Saved swc result root path")
+
+    # Training patch / stride
+    parser.add_argument("--batch_size", type=int, default=defaults["batch_size"], help="batch size of trainset")
+    parser.add_argument("--valid_rate", type=float, default=defaults["valid_rate"])
+    parser.add_argument(
+        "--data_shape",
+        type=int,
+        nargs=3,
+        default=defaults["data_shape"],
+        metavar=("DEPTH", "HEIGHT", "WIDTH"),
+        help="input data shape",
+    )
+
+    parser.add_argument("--test_patch_height", type=int, default=defaults["test_patch_height"])
+    parser.add_argument("--test_patch_width", type=int, default=defaults["test_patch_width"])
+    parser.add_argument("--test_patch_depth", type=int, default=defaults["test_patch_depth"])
+    parser.add_argument("--stride_height", type=int, default=defaults["stride_height"])
+    parser.add_argument("--stride_width", type=int, default=defaults["stride_width"])
+    parser.add_argument("--stride_depth", type=int, default=defaults["stride_depth"])
+
+    # IO paths
+    parser.add_argument("--model_save_dir", default=defaults["model_save_dir"], help="save path of trained model")
+    parser.add_argument("--log_save_dir", default=defaults["log_save_dir"], help="save path of trained log")
+
+    # Train
+    parser.add_argument("--epochs", type=int, default=defaults["epochs"], metavar="N", help="number of epochs to train")
+    parser.add_argument("--lr", type=float, default=defaults["lr"], metavar="LR", help="learning rate")
+    parser.add_argument("--vector_bins", type=int, default=defaults["vector_bins"])
+    parser.add_argument("--train_seg", type=_str2bool, default=defaults["train_seg"])
+
+    # Test / inference
+    parser.add_argument("--print_info", type=_str2bool, default=defaults["print_info"])
+    parser.add_argument(
+        "--tracing_strategy_mode",
+        default=defaults["tracing_strategy_mode"],
+        type=str,
+        help="centerline | angle | anglecenterlined",
+    )
+    parser.add_argument("--train_or_test", default=defaults["train_or_test"])
+    parser.add_argument("--to_restore", type=_str2bool, default=defaults["to_restore"])
+
+    return parser
+
+
+def _parse_args() -> argparse.Namespace:
+    initial_parser = argparse.ArgumentParser(add_help=False)
+    initial_parser.add_argument("--config_path", default=str(_DEFAULT_CONFIG_PATH))
+    known_args, _ = initial_parser.parse_known_args()
+    resolved_config_path = _resolve_config_path(known_args.config_path)
+    defaults = _load_defaults(resolved_config_path)
+    parser = _build_parser(defaults, resolved_config_path)
+    args = parser.parse_args()
+    args.config_path = str(_resolve_config_path(args.config_path))
+    if isinstance(args.data_shape, tuple):
+        args.data_shape = list(args.data_shape)
+    elif isinstance(args.data_shape, List):
+        args.data_shape = list(args.data_shape)
+    return args
+
+
+args = _parse_args()

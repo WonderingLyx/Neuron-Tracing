@@ -24,6 +24,9 @@ import tifffile
 import os
 from shutil import rmtree
 import argparse
+import glob
+import functools
+import json
 
 
 # python prepare_datasets_3D.py --datasets_name FMOST --train_dataset_root_dir /4T/liuchao/deepneutracing/deepbranchtracer_3d/FMOST/training_data_rnn/ --data_type uint16
@@ -39,12 +42,14 @@ def parse_args():
 	# (input dir) orginal data
 	parser.add_argument('--datasets_name', default='Neuron3d_192',help='datasets name') # CHASEDB1
 
-	parser.add_argument('--image_dir', default='/root/shared-nvme/lyx_neuron/data/DATASET/', help='orginal image saved here')
+	parser.add_argument('--image_dir', default=r'E:\Project\NeuronTracing\data/', help='orginal image saved here')
 	
 	# (output dir)
-	parser.add_argument('--train_dataset_root_dir', default='/root/shared-nvme/lyx_neuron/data/DATASET/Neuron3d_192/dataset/', help='training dataset saved here')
+	parser.add_argument('--train_dataset_root_dir', default=r'E:\Project\NeuronTracing\data\Neuron3d_192\dataset/', help='training dataset saved here')
 	parser.add_argument('--N_patches', default=300,help='Number of training image patches') # 80000 20000
 	parser.add_argument('--data_type', default='uint8') # 80000 20000
+	parser.add_argument('--train_total_fsize', type=float, default=None, help='Optional manual baseline for training swc size (bytes); leave empty to auto compute')
+	parser.add_argument('--test_total_fsize', type=float, default=None, help='Optional manual baseline for test swc size (bytes); leave empty to auto compute')
  
 	# data parameter
 	parser.add_argument('--input_dim', type=int, default=(64,64,64))
@@ -53,6 +58,52 @@ def parse_args():
 	args = parser.parse_args()
 	
 	return args
+
+
+TRAIN_TOTAL_FSIZE = None
+TEST_TOTAL_FSIZE = None
+
+
+def _collect_swc_files(swc_dir):
+	if not swc_dir or not os.path.exists(swc_dir):
+		return []
+	swc_files = []
+	for pattern in ('*.swc', '*.SWC'):
+		swc_files.extend(glob.glob(os.path.join(swc_dir, pattern)))
+	# remove duplicates while preserving filesystem order
+	seen = set()
+	unique_files = []
+	for path in swc_files:
+		if path not in seen:
+			unique_files.append(path)
+			seen.add(path)
+	return unique_files
+
+
+def compute_average_swc_size(swc_dir):
+	"""Return the average size (bytes) of swc files under swc_dir."""
+	swc_files = _collect_swc_files(swc_dir)
+	if not swc_files:
+		return None
+	sizes = []
+	for swc_path in swc_files:
+		try:
+			sizes.append(os.path.getsize(swc_path))
+		except OSError:
+			continue
+	if not sizes:
+		return None
+	return float(sum(sizes)) / len(sizes)
+
+
+def resolve_total_fsize(manual_value, swc_dir, fallback_value):
+	"""Choose manual total_fsize if provided, else average swc size, else fallback."""
+	if manual_value is not None and manual_value > 0:
+		return manual_value
+	auto_value = compute_average_swc_size(swc_dir)
+	if auto_value is not None:
+		return auto_value
+	return fallback_value
 
 
 
@@ -678,9 +729,15 @@ def prepare_train_datasets(image_seq_dir, swc_tree_centerline_matirx, img_sim, l
 
 
 
-def main_training_data(input_dir):
+def main_training_data(input_dir, total_fsize_override=None, BATCH_SHAPE=(64,64,64)):
 	args = parse_args()
 	datasets_name = args.datasets_name
+	if args.train_total_fsize is not None and args.train_total_fsize > 0:
+		total_fsize = args.train_total_fsize
+	else:
+		total_fsize = total_fsize_override
+	if total_fsize is None or total_fsize <= 0:
+		total_fsize = 720000
 
 	image_seq_dir = args.train_dataset_root_dir + 'training_datasets/'
 	org_image_train_dir = args.image_dir + datasets_name + '/training/images/'
@@ -690,7 +747,7 @@ def main_training_data(input_dir):
 	temp_swc_centerline_dir = args.image_dir + datasets_name + '/temp/swc_centerline/'
 	temp_centerline_dir = args.image_dir + datasets_name + '/temp/centerline/'
 
-	image_name = input_dir.split("/")[-1].split(".")[0]
+	image_name = os.path.basename(input_dir).split(".")[0]
 
 	print(image_name)
 
@@ -699,7 +756,6 @@ def main_training_data(input_dir):
 		swc_dir = org_swc_train_dir + image_name + '.adj.swc'
 
 		fsize = os.path.getsize(swc_dir)
-		total_fsize = 720000
 		fsize_rate = fsize/total_fsize
 		patch_num = round(args.N_patches * fsize_rate // 5)
 
@@ -712,7 +768,6 @@ def main_training_data(input_dir):
 		swc_dir = org_swc_train_dir + image_name + '_Probabilities.swc'
 
 		fsize = os.path.getsize(swc_dir)
-		total_fsize = 720000
 		fsize_rate = fsize/total_fsize
 		patch_num = round(args.N_patches * fsize_rate // 5)
 
@@ -726,7 +781,6 @@ def main_training_data(input_dir):
 		swc_dir = org_swc_train_dir + image_name + '.swc'
 
 		fsize = os.path.getsize(swc_dir)
-		total_fsize = 720000
 		fsize_rate = fsize/total_fsize
 		patch_num = round(args.N_patches * fsize_rate // 5)
 
@@ -782,9 +836,18 @@ def main_training_data(input_dir):
 	time.sleep(1)
 
 
-def main_test_data(input_dir):
+def main_test_data(input_dir, total_fsize_override=None, BATCH_SHAPE=(64,64,64)):
 	args = parse_args()
 	datasets_name = args.datasets_name
+	if args.test_total_fsize is not None and args.test_total_fsize > 0:
+		total_fsize = args.test_total_fsize
+	else:
+		total_fsize = total_fsize_override
+	if total_fsize is None or total_fsize <= 0:
+		if datasets_name == 'FMOST':
+			total_fsize = 140000
+		else:
+			total_fsize = 720000
 
 	image_seq_dir = args.train_dataset_root_dir + 'test_datasets/'
 	org_image_train_dir = args.image_dir + datasets_name + '/test/images/'
@@ -803,7 +866,6 @@ def main_test_data(input_dir):
 		swc_dir = org_swc_train_dir + image_name + '.adj.swc'
 
 		fsize = os.path.getsize(swc_dir)
-		total_fsize = 140000
 		fsize_rate = fsize/total_fsize
 		patch_num = round(args.N_patches * fsize_rate // 10 // 5)
 
@@ -816,7 +878,6 @@ def main_test_data(input_dir):
 		swc_dir = org_swc_train_dir + image_name + '_Probabilities.swc'
 
 		fsize = os.path.getsize(swc_dir)
-		total_fsize = 720000
 		fsize_rate = fsize/total_fsize
 		patch_num = round(args.N_patches * fsize_rate // 5)
 
@@ -830,7 +891,6 @@ def main_test_data(input_dir):
 		swc_dir = org_swc_train_dir + image_name + '.swc'
 
 		fsize = os.path.getsize(swc_dir)
-		total_fsize = 720000
 		fsize_rate = fsize/total_fsize
 		patch_num = round(args.N_patches * fsize_rate // 5)
 
@@ -931,29 +991,45 @@ if __name__ == '__main__':
 	if not os.path.exists(test_datasets_dir):
 		os.makedirs(test_datasets_dir)
 
+	#global TRAIN_TOTAL_FSIZE, TEST_TOTAL_FSIZE
+	############* 自动计算 total_fsize 基线 *#############
+	train_default_total_fsize = 720000
+	test_default_total_fsize = 140000 if datasets_name == 'FMOST' else 720000
+	TRAIN_TOTAL_FSIZE = resolve_total_fsize(args.train_total_fsize, org_swc_train_dir, train_default_total_fsize)
+	TEST_TOTAL_FSIZE = resolve_total_fsize(args.test_total_fsize, org_swc_test_dir, test_default_total_fsize)
+	print('Using training total_fsize baseline: %.2f' % (TRAIN_TOTAL_FSIZE))
+	print('Using test total_fsize baseline: %.2f' % (TEST_TOTAL_FSIZE))
 
+
+	############* 批处理切分数据  *#############
 	org_label_list = glob.glob(org_image_train_dir + '*.tif')
 	org_label_num = len(org_label_list)
 	print('find %d images' % (org_label_num))
 	pool = mp.Pool(processes=cpu_core_num)  # we set cpu core is 4
-	pool.map(main_training_data, org_label_list) 
+	train_worker = functools.partial(main_training_data, total_fsize_override=TRAIN_TOTAL_FSIZE, BATCH_SHAPE=BATCH_SHAPE) #*functools.partial 用来预先固定函数的一部分参数。
+	pool.map(train_worker, org_label_list) 
 	#main_training_data(org_label_list[2])
 
 	org_label_list = glob.glob(org_image_test_dir + '*.tif')
 	org_label_num = len(org_label_list)
 	print('find %d images' % (org_label_num))
 	pool = mp.Pool(processes=cpu_core_num)  
-	pool.map(main_test_data, org_label_list)
+	test_worker = functools.partial(main_test_data, total_fsize_override=TEST_TOTAL_FSIZE, BATCH_SHAPE=BATCH_SHAPE)
+	pool.map(test_worker, org_label_list)
 
+	############* 统计切分后的数据 *#############
 	import shutil
 	total_training_data_num = 0
 	training_dataset_list = glob.glob(training_datasets_dir + '*/')
 	training_dataset_image_num = len(training_dataset_list)
 	print('find %d image folders' % (training_dataset_image_num))
+	training_folder_stats = {}
 	for training_dataset_image_dir in training_dataset_list:
 		training_dataset_image_list = glob.glob(training_dataset_image_dir + '*/')
 		training_dataset_image_patch_num = len(training_dataset_image_list)
-		print('Folder: %s, find %d images patches' % (training_dataset_image_dir.split('/')[-2], training_dataset_image_patch_num))
+		folder_name = os.path.basename(os.path.normpath(training_dataset_image_dir))
+		print('Folder: %s, find %d images patches' % (folder_name, training_dataset_image_patch_num))
+		training_folder_stats[folder_name] = training_dataset_image_patch_num
 		total_training_data_num += training_dataset_image_patch_num
 		# for training_dataset_image_patch_dir in training_dataset_image_list:
 		# 	shutil.rmtree(training_dataset_image_patch_dir)
@@ -963,14 +1039,34 @@ if __name__ == '__main__':
 	test_dataset_list = glob.glob(test_datasets_dir + '*/')
 	test_dataset_image_num = len(test_dataset_list)
 	print('find %d image folders' % (test_dataset_image_num))
+	test_folder_stats = {}
 	for test_dataset_image_dir in test_dataset_list:
 		test_dataset_image_list = glob.glob(test_dataset_image_dir + '*/')
 		test_dataset_image_patch_num = len(test_dataset_image_list)
-		print('Folder: %s, find %d images patches' % (test_dataset_image_dir.split('/')[-2], test_dataset_image_patch_num))
+		folder_name = os.path.basename(os.path.normpath(test_dataset_image_dir))
+		print('Folder: %s, find %d images patches' % (folder_name, test_dataset_image_patch_num))
+		test_folder_stats[folder_name] = test_dataset_image_patch_num
 		total_test_data_num += test_dataset_image_patch_num
 		# for test_dataset_image_patch_dir in test_dataset_image_list:
 		# 	shutil.rmtree(test_dataset_image_patch_dir)
 	print('TOTAL %d images patches' % (total_test_data_num))
 
-
+	stats_payload = {
+		'datasets_name': datasets_name,
+		'generation_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
+		'training': {
+			'folder_count': training_dataset_image_num,
+			'total_patches': total_training_data_num,
+			'per_folder': training_folder_stats
+		},
+		'test': {
+			'folder_count': test_dataset_image_num,
+			'total_patches': total_test_data_num,
+			'per_folder': test_folder_stats
+		}
+	}
+	stats_output_path = os.path.join(args.train_dataset_root_dir, f'{datasets_name}_dataset_stats.json')
+	with open(stats_output_path, 'w', encoding='utf-8') as stats_file:
+		json.dump(stats_payload, stats_file, ensure_ascii=False, indent=2)
+	print('Dataset statistics saved to %s' % (stats_output_path))
 

@@ -24,7 +24,7 @@ from tensorboardX import SummaryWriter
 import matplotlib.pyplot as plt
 from skimage import morphology, transform
 
-from configs import config_neuron_2d
+from configs import config_neuron_3d
 from models.Models_2D import SAM2_Net_2D
 from tools.tracing.tracing_tools_2D import get_pos_image_2d, get_network_predict_2d, tracing_strategy_fast_2d, tracing_strategy_lstm_2d
 from tools.Data_Loader_2d import Images_Dataset_folder_2d
@@ -42,7 +42,7 @@ from lib.swclib.re_sample import up_sample_swc_tree
 import logging
 from datetime import datetime
 
-args = config_neuron_2d.args
+args = config_neuron_3d.args
 resize_radio = args.resize_radio
 r_resize = args.r_resize
 
@@ -1519,7 +1519,7 @@ if __name__=='__main__':
     #######################################################
     #              load the config of model
     #######################################################
-    args = config_neuron_2d.args
+    args = config_neuron_3d.args
 
     #######################################################
     #              Checking if GPU is used
